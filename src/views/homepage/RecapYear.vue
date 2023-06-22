@@ -1,0 +1,1032 @@
+<script>
+import { defineComponent } from 'vue';
+import {
+	IonHeader,
+	IonContent,
+	IonToolbar,
+	IonMenuButton,
+	IonPage,
+	IonList,
+	IonItem,
+	IonLabel,
+	IonListHeader,
+	IonButton,
+	IonSpinner,
+	IonRefresher,
+	IonChip,
+	IonItemGroup,
+	IonButtons,
+	IonRefresherContent,
+	IonSkeletonText,
+	alertController,
+	IonNavLink,
+} from '@ionic/vue';
+
+import { NotificationBadge } from 'capacitor-notification-badge';
+
+import hapticsController from '@/functions/utils/hapticsController.js';
+
+//import { StatusBar, Style } from '@capacitor/status-bar';
+
+import { tickHomework } from "@/functions/fetch/GetHomeworks.js";
+
+import { Network } from '@capacitor/network';
+
+import UserView from '../settings/UserView.vue';
+import InfoView from '../news/InfoView.vue';
+import MarkView from '../grades/MarkView.vue';
+import HomeworkItemView from '../homework/HomeworkItemView.vue';
+
+import timetableEdit from '@/functions/utils/timetableEdit.js';
+import subjectColor from '@/functions/utils/subjectColor.js';
+
+// recap
+import GetRecap from "@/functions/fetch/GetRecap.js";
+
+import displayToast from '@/functions/utils/displayToast.js';
+import { alertCircle } from 'ionicons/icons';
+
+// confetti
+
+import JSConfetti from 'js-confetti'
+const jsConfetti = new JSConfetti()
+
+export default defineComponent({
+	name: 'FolderPage',
+	components: {
+		IonHeader,
+		IonContent,
+		IonToolbar,
+		IonMenuButton,
+		IonButtons,
+		IonPage,
+		IonList,
+		IonListHeader,
+		IonButton,
+		IonItem,
+		IonLabel,
+		IonSpinner,
+		IonRefresher,
+		IonChip,
+		IonItemGroup,
+		IonRefresherContent,
+		IonSkeletonText,
+		IonNavLink,
+	},
+	data() {
+		return {
+			connected: false,
+			fakeTime: 200,
+			timetable: [],
+			ttbLoading: false,
+			nextCoursTime: "",
+			nextCoursStarted: false,
+			nextCoursCompletion: 0,
+			percentage: 0,
+			updateTime: null,
+			firstName: '',
+			homeworks: [],
+			hwLoading: true,
+			blockChangeDone: false,
+			editMode: false,
+			noCoursesEmoji: this.randomEmoji(),
+			noCoursesMsg: this.randomMsg(),
+			userData: [],
+			userName: "",
+			userFullName: "",
+			avatar: "",
+			grades: [],
+			gradesLoading: true,
+			UserView: UserView,
+			news: [],
+			newsLoading: true,
+			internetConnection: true,
+			allLoaded: false,
+			showLoading: true,
+			toolbarColor: "",
+			InfoView: InfoView,
+			MarkView: MarkView,
+			HomeworkItemView: HomeworkItemView,
+			serverError: false,
+			nextCoursStartTime: "00:00",
+			nextCoursEndTime: "00:00",
+		}
+	},
+	methods: {
+		goto(url) {
+			document.dispatchEvent(new CustomEvent('navTransitionEnable'));
+			this.$router.push(url);
+		},
+		editTimetable(timetable) {
+			const now = new Date();
+			let lessons = []
+
+			timetable = timetableEdit(timetable);
+
+		
+			// get next lesson (cours.time.start)
+			lessons = timetable.filter((lesson) => {
+				const lessonStart = new Date(lesson.time.start);
+				const lessonEnd = new Date(lesson.time.end);
+
+				// get minutes before next lesson
+				let mins = Math.floor((lessonStart - now) / 1000 / 60);
+				const gap = -((Math.floor((lessonEnd - lessonStart) / 1000 / 60)) / 2);
+
+				if (lessons.length != 0) {
+					return false;
+				}
+
+				this.nextCoursStartTime = lessonStart.toLocaleString('fr-FR', { hour: '2-digit', minute: '2-digit' })
+				this.nextCoursEndTime = lessonEnd.toLocaleString('fr-FR', { hour: '2-digit', minute: '2-digit' })
+
+				// if less than 60 mins
+				if (mins < 60 && mins >= 0) {
+					if (mins > 1) {
+						this.nextCoursTime = `dans ${mins+1} minutes`
+					} else if (mins == 0) {
+						this.nextCoursTime = `dans moins d'une minute`
+					} else {
+						this.nextCoursTime = `dans ${mins+1} minute(s)`
+					}
+
+					this.nextCoursStarted = false;
+				} else if (mins < 0) {
+					if (lessonEnd <= now) {
+						return false;
+					}
+
+					this.nextCoursStarted = true;
+
+					// get percentage of lesson done
+					const lessonTime = lessonEnd - lessonStart;
+					const lessonTimeDone = now - lessonStart;
+					const percentage = Math.floor((lessonTimeDone / lessonTime) * 100);
+
+					this.nextCoursCompletion = percentage;
+
+					// get minutes before lesson ends
+					const endMins = Math.floor((lessonEnd - now) / 1000 / 60);
+
+					this.nextCoursTime = `${endMins} min rest.`;
+				} else {
+					let hours = Math.floor(mins / 60);
+					mins = mins % 60;
+
+					if (mins > 1) {
+						mins = `${mins} minutes`;
+					} else {
+						mins = `${mins} minute`;
+					}
+
+					if (hours > 1) {
+						hours = `${hours} heures`;
+					} else {
+						hours = `${hours} heure`;
+					}
+
+					this.nextCoursTime = `dans ${hours} et ${mins}`;
+
+					this.nextCoursStarted = false;
+				}
+
+				if (mins < gap) {
+					return false;
+				}
+
+				lesson.hasStatus = lesson.status.status != undefined;
+
+				lessons.push(lesson)
+				return true;
+			});
+
+			// if lessons is empty but not timetable, get last lesson
+			if (lessons.length == 0 && timetable.length > 0) {
+				for (let i = timetable.length - 1; i >= 0; i--) {
+					const lesson = timetable[i];
+
+					const lessonEnd = new Date(lesson.time.end);
+					const lessonStart = new Date(lesson.time.start);
+					const endMins = Math.floor((lessonEnd - now) / 1000 / 60);
+					const startMins = Math.floor((lessonStart - now) / 1000 / 60);
+
+					const lessonDuration = -(Math.floor((lessonEnd - lessonStart) / 1000 / 60));
+
+					if (endMins < -120) {
+						continue;
+					}
+
+					if (startMins > lessonDuration) {
+						this.nextCoursStarted = true;
+
+						// get percentage of lesson done
+						const lessonTime = lessonEnd - lessonStart;
+						const lessonTimeDone = now - lessonStart;
+						const percentage = Math.floor((lessonTimeDone / lessonTime) * 100);
+
+						this.nextCoursCompletion = percentage;
+
+						this.nextCoursTime = `${endMins} min rest.`;
+
+
+						lesson.hasStatus = lesson.status.status != undefined;
+
+						lessons.push(lesson);
+						break;
+					}
+
+					this.nextCoursTime = "Cours terminé";
+					this.nextCoursStarted = false;
+					lesson.hasStatus = lesson.status.status != undefined;
+					lessons.push(lesson);
+					break;
+				}
+			}
+
+			return lessons;
+		},
+		getRecap(force) {
+			GetRecap(force).then((recap) => {
+				this.timetable = [];
+				this.homeworks = [];
+				this.grades = [];
+				this.news = [];
+
+				this.useRecap(recap)
+
+				localStorage.setItem("recap", JSON.stringify(recap));
+			})
+				.catch((err) => {
+					console.error("[HOMEPAGE] : " + err);
+
+					if (err[0] == "ERR_NETWORK") {
+						this.showLoading = false;
+						this.allLoaded = false;
+						this.serverError = true;
+					}
+				});
+		},
+		useRecap(recap) {
+			// loaded
+			setTimeout(() => {
+				this.allLoaded = true;
+				this.showLoading = false;
+			}, this.fakeTime);
+
+			this.fakeTime = 100;
+
+			// timetable
+			const timetable = recap.timetable;
+			this.timetable = this.editTimetable(timetable);
+			this.ttbloading = false;
+
+			clearInterval(this.updateTime);
+			this.updateTime = setInterval(() => {
+				this.timetable = this.editTimetable(timetable);
+			}, 600);
+
+			// homeworks
+			const homeworks = recap.homeworks;
+			this.homeworks = this.formatHomeworks(homeworks);
+			this.hwLoading = false;
+
+			// grades
+			this.grades = recap.grades.last;
+			this.gradesLoading = false;
+
+			// news
+			this.news = recap.news;
+			this.newsLoading = false;
+		},
+		formatHomeworks(homeworks) {
+			const homeworkDays = [];
+			const today = new Date();
+
+			// sort homeworks by day
+			for (let i = 0; i < homeworks.length; i++) {
+				const homework = homeworks[i];
+				const date = new Date(homework.data.date);
+
+				homeworks[i].homework.content = homeworks[i].homework.content.replace('<br/>', ' ');
+
+				homeworks[i].data.timeLeft = Math.floor((date - today) / 1000 / 60 / 60 / 24);
+
+				let day = homeworkDays.find((day) => {
+					return day.date == date.toDateString();
+				});
+
+				if (!day) {
+					day = {
+						date: date.toDateString(),
+						homeworks: []
+					}
+					homeworkDays.push(day);
+				}
+
+				day.homeworks.push(homework);
+			}
+
+			// sort homeworkDays by date
+			homeworkDays.sort((a, b) => {
+				return new Date(a.date) - new Date(b.date);
+			});
+
+			return homeworkDays;
+		},
+		reorder() {
+			const order = ["comp-hw", "comp-tt"]
+
+			const components = document.getElementById("components");
+			if (components) {
+				for (let i = 0; i < order.length; i++) {
+					const comp = document.getElementById(order[i]);
+					if (comp) {
+						components.appendChild(comp);
+					}
+				}
+			}
+		},
+		changeDone(hw, event) {
+			// vars
+			const homeworkID = hw.data.id;
+			const dateSet = new Date(hw.data.date)
+
+			// add one day to date
+			dateSet.setDate(dateSet.getDate() + 1);
+
+			const disableConfetti = localStorage.getItem("disableConfetti");
+
+			// if checked
+			if (event.target.checked) {
+				if (disableConfetti != "true") {
+					jsConfetti.addConfetti({
+						emojis: ['✅', '🍾', '🎊'],
+						confettiNumber: 20,
+					})
+
+					hapticsController.confetti();
+				}
+				else {
+					hapticsController.notification('success');
+				}
+			}
+			else {
+				hapticsController.notification('success');
+			}
+
+			// new send request
+			if (!this.dontRetryCheck) {
+				tickHomework([homeworkID, dateSet]).then(() => {
+					this.dontRetryCheck = true;
+
+					setTimeout(() => {
+						this.dontRetryCheck = false;
+					}, 100);
+				})
+					.catch((error) => {
+						// refresh
+						this.getRecap(true);
+
+						displayToast.presentToastFull(
+							"Impossible de marquer ce devoir comme fait",
+							"Une erreur est survenue lors de la requête.",
+							"danger",
+							alertCircle,
+							true,
+							error
+						)
+					});
+			}
+		},
+		checkUndone() {
+			// get number of undone homeworks (for badge)
+			const homeworkDays = this.homeworks;
+
+			const tomorrowDate = new Date(this.$rn);
+			tomorrowDate.setDate(tomorrowDate.getDate() + 1);
+
+			const tomorrow = homeworkDays.find((day) => {
+				return day.date == tomorrowDate.toDateString();
+			});
+
+			// for each homework, check if it's done
+			let undone = 0;
+			if (tomorrow) {
+				tomorrow.homeworks.forEach((homework) => {
+					if (!homework.data.done) {
+						undone++;
+
+						NotificationBadge.setBadgeCount({
+							count: undone,
+						})
+
+					}
+				});
+			}
+		},
+		async handleRefresh(event) {
+			this.getRecap(true);
+
+			this.noCoursesMsg = this.randomMsg();
+			this.noCoursesEmoji = this.randomEmoji();
+
+			this.connected = await Network.getStatus()
+			this.connected = this.connected.connected;
+
+			setTimeout(() => {
+				event.detail.complete();
+			}, 1000);
+		},
+		async displayBetaMsg() {
+			const alert = await alertController.create({
+				header: 'Page d\'accueil',
+				message: 'Cette page est en cours de développement. Elle ne contient pas tout le contenu prévu et subira de multiples changements à l\'avenir.',
+				mode: 'md',
+				buttons: ['Je comprends']
+			});
+
+			await alert.present();
+		},
+		async getAvatar() {
+			if (localStorage.getItem('customAvatar')) {
+				this.avatar = localStorage.getItem('customAvatar');
+			}
+			else if (localStorage.getItem('avatarCache')) {
+				this.avatar = localStorage.getItem('avatarCache');
+			}
+			else if (localStorage.getItem('userData')) {
+				this.avatar = JSON.parse(localStorage.getItem('userData')).student.avatar;
+			}
+
+			document.addEventListener('userDataUpdated', () => {
+				if (localStorage.getItem('customAvatar')) {
+					this.avatar = localStorage.getItem('customAvatar');
+				}
+				else if (localStorage.getItem('avatarCache')) {
+					this.avatar = localStorage.getItem('avatarCache');
+				}
+			});
+		},
+		getUserData() {
+			this.getAvatar();
+
+			// get userData
+			this.userData = JSON.parse(localStorage.userData);
+
+			this.userName = JSON.parse(localStorage.userData).student.name.split(" ")[JSON.parse(localStorage.userData).student.name.split(" ").length - 1]
+			this.userFullName = JSON.parse(localStorage.userData).student.name;
+
+			// put last word of userFullName first
+			const name = this.userFullName.split(" ");
+			const lastName = name[name.length - 1];
+			name.pop();
+			name.unshift(lastName);
+			this.userFullName = name.join(" ");
+		},
+		getBoolOpt(opt, defaultVal = true) {
+			if (localStorage.getItem(opt)) {
+				this[opt] = (localStorage.getItem(opt) == 'true' ? true : false);
+			}
+			else if ((typeof defaultVal) != 'undefined' && defaultVal != null) {
+				this[opt] = defaultVal;
+				localStorage.setItem(opt, defaultVal);
+			}
+		},
+		getBoolOpts(opts) {
+			opts.forEach(opt => this.getBoolOpt(opt));
+		}
+	},
+	ionViewDidEnter() {
+		return false;
+	},
+	async mounted() {
+		const boolOpts = [
+			'displayNextCourse',
+			'displayNews',
+			'displayLastGrades',
+			'displayAvatar',
+			'displayFirstName',
+			'displayHomeworks'
+		];
+
+		if (localStorage.getItem('userData')) {
+			// get first name
+			const name = JSON.parse(localStorage.getItem('userData')).student.name;
+			// get last word of name
+			this.firstName = name.split(' ').pop();
+		}
+
+		this.getBoolOpts(boolOpts);
+
+		this.connected = await Network.getStatus();
+		this.connected = this.connected.connected;
+
+		// get data
+		if (localStorage.getItem('recap')) {
+			const recap = JSON.parse(localStorage.getItem('recap'));
+			this.useRecap(recap);
+		}
+
+		this.getRecap();
+
+		document.addEventListener('tokenUpdated', () => {
+			this.getRecap();
+		});
+
+		this.getUserData();
+
+		document.addEventListener('userDataLoaded', () => {
+			this.getUserData();
+		});
+
+		document.addEventListener('userDataUpdated', () => {
+			this.getUserData();
+		});
+
+		// check internet connection
+		Network.addListener('networkStatusChange', (status) => {
+			this.internetConnection = status.connected;
+		});
+
+		// check if user already disconnected
+		if (!navigator.onLine) {
+			this.internetConnection = false;
+		}
+
+		document.addEventListener('settingsUpdated', () => {
+			this.getBoolOpts(boolOpts);
+		});
+	}
+});
+</script>
+
+<template>
+	<ion-page ref="page">
+		<IonHeader class="AppHeader" translucent>
+			<IonToolbar class="toolbar">
+				<ion-buttons slot="start">
+					<ion-menu-button mode="md"></ion-menu-button>
+				</ion-buttons>
+				
+				<ion-title mode="md">
+					<div class="profile">
+						<p>{{ displayFirstName ? userFullName : userName }}</p>
+						<h3>Votre récaptitulatif annuel</h3>
+					</div>
+				</ion-title>
+
+				<ion-buttons slot="end">
+					<ion-nav-link v-if="avatar" router-direction="forward" :component="UserView">
+						<ion-avatar class="userAvatar" v-if="displayAvatar">
+							<img :src="avatar" />
+						</ion-avatar>
+					</ion-nav-link>
+				</ion-buttons>
+			</IonToolbar>
+		</IonHeader>
+
+		<ion-content :fullscreen="true">
+			<ion-header collapse="condense" class="HomeHeader">
+
+                <ion-toolbar class="welcomeHeader">
+                    <ion-title size="large" v-if="userName">Bienvenue sur votre récapitulatif, {{ userName }} !</ion-title>
+					<ion-title size="large" v-else>Vue d'ensemble</ion-title>
+				</ion-toolbar>
+            </ion-header>
+
+			<div id="components" ref="components">
+				<Transition name="ElemAnim">
+					<ion-list v-if="displayHomeworks && allLoaded && !hwloading" lines="none" id="comp-hw"
+						ref="comp-hw" inset="true">
+						<div v-if="!hwloading"><ion-item-group class="hw_group" v-for="(day, i) in homeworks" :key="i">
+								<div class="homepage_divider">
+									<p>pour <span>{{ new Date(day.date).toLocaleString('fr-FR', {
+										weekday: 'long',
+										day: 'numeric', month: 'short'
+									}) }}</span></p>
+									<div class="divider"></div>
+								</div>
+
+							
+							</ion-item-group></div>
+					</ion-list>
+				</Transition>
+
+				<!-- <Transition name="ElemAnim"> -->
+					<ion-list  id="comp-grades" ref="comp-grades"
+						lines="none" inset="true" class="hw_group">
+						<ion-list-header class="listHeader">
+                                <h1>test</h1>
+                                <div>
+                                    salut, ça va ?
+                                </div>
+                        </ion-list-header>
+					</ion-list>
+				<!-- </Transition> -->
+			</div>
+
+
+		</ion-content>
+	</ion-page>
+</template>
+
+<style scoped>
+.profile * {
+	margin: 0;
+	padding: 0;
+}
+
+.profile p {
+	font-size: 15px;
+	opacity: 0.5;
+	font-weight: 400;
+}
+
+.profile h3 {
+	font-size: 17.5px;
+	font-weight: 500 !important;
+}
+
+.userAvatar {
+	height: 32px;
+	width: 32px;
+}
+
+.iconDisplay {
+	display: flex;
+	align-items: center;
+
+	opacity: 0.8;
+
+	width: fit-content;
+
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	margin-bottom: 3px;
+}
+
+.emoji {
+	font-size: 1.5em;
+	margin-right: 20px;
+}
+
+.nextCourse ion-chip {
+	padding: 2px 9px !important;
+	height: fit-content;
+	font-weight: 600;
+	font-size: 16px;
+	font-family: var(--papillon-font);
+}
+
+.nextToolbar {
+	height: 40px;
+	overflow: visible;
+}
+
+.nextToolbar .toolbar-container {
+	overflow: visible;
+}
+
+.nextCourse {
+	overflow: visible !important;
+	background: none;
+	padding: 0;
+	z-index: 99999;
+
+	margin: 0 12px !important;
+}
+
+.md .nextCourse {
+	margin: 0 16px !important;
+}
+
+.coursElemNext {
+	overflow: visible !important;
+}
+
+.coursElemNext {
+	overflow: visible !important;
+}
+
+.nextCours {
+	margin-top: 0 !important;
+	margin-bottom: 0px !important;
+	border-radius: 10px;
+	overflow: hidden !important;
+
+	margin: 0px 0px;
+
+	--ion-item-background: var(--ion-inset-background);
+	--ion-text-color: #000;
+
+	/* box-shadow: var(--ion-box-shadow); */
+
+	/* border: 0.5px solid #00000012; */
+}
+
+.dark .nextCours {
+	--ion-text-color: #fff;
+	--ion-item-background: var(--ion-color-step-100) !important;
+}
+
+.nextCours::part(native) {
+	border-radius: 10px;
+	overflow: hidden !important;
+}
+
+.courseColor {
+	width: 10px;
+	height: 10px;
+	border-radius: 50%;
+	background-color: var(--courseColor);
+	display: inline-block;
+	margin-right: 5px;
+}
+
+.nextCours .timeChip {
+	margin-right: 15px;
+}
+
+.nextCours .timeChip ion-chip {
+	font-weight: 500;
+	padding-top: 1px;
+}
+
+.nextCours .progression {
+	display: flex;
+	align-items: center;
+	gap: 5px;
+}
+
+.nextCours .progression .progressBar {
+	width: 100%;
+	height: 5px;
+	background-color: var(--ion-color-step-150);
+	border-radius: 5px;
+	margin-right: 5px;
+	transition: 5s;
+}
+
+.nextCours .progression .progressBar .progress {
+	height: 100%;
+	background-color: var(--courseColor);
+	border-radius: 5px;
+}
+
+.nextCours .progression .startProg {
+	opacity: 0.5;
+}
+
+.nextCours .progression .endProg {
+	font-weight: 500;
+}
+
+.nextCours.cancelled ion-chip {
+	opacity: 0.5;
+}
+
+.nextCours.cancelled ion-label {
+	opacity: 0.5;
+}
+
+.nextCours.HasStatus {
+	border-radius: 12px 12px 0 0 !important;
+}
+
+.nextCours.HasStatus::part(native) {
+	border-radius: 12px 12px 0 0 !important;
+}
+
+.nextStatus {
+	width: 100%;
+	background: var(--courseColor) !important;
+
+	display: flex;
+	align-items: center;
+	gap: 12px;
+
+	padding: 8px 24px;
+
+	color: #fff;
+}
+
+.nextStatus * {
+	margin: 0;
+}
+
+.nextStatus span {
+	font-size: 20px;
+}
+
+.nextStatus p {
+	font-size: 15px;
+	font-weight: 500;
+	font-family: var(--papillon-font);
+}
+
+.nextStatus.cancelled {
+	background: #FF453A;
+}
+
+.ion-color .nextStatus {
+	background: #ffffff20 !important;
+}
+
+.homepage_divider {
+	display: flex;
+	align-items: center;
+	padding: 3.5px 18px;
+	width: 210px;
+	background: #EADBFC;
+	border-radius: 0px 300px 300px 0px;
+}
+
+.dark .homepage_divider {
+	background: #443F4A77;
+	color: #EADBFC !important;
+}
+
+.homepage_divider * {
+	margin: 0;
+}
+
+.homepage_divider p {
+	font-weight: 400;
+	font-size: 16px;
+	font-family: var(--papillon-font) !important;
+}
+
+.homepage_divider p span {
+	font-weight: 500;
+	font-family: var(--papillon-font) !important;
+}
+
+.hw_group {
+	padding-bottom: 10px;
+}
+
+.hw_group ion-item {
+	--border-width: 0;
+}
+
+.hw_group ion-chip {
+	padding-left: 10px !important;
+}
+
+.hw_group ion-chip span {
+	margin-right: 5px;
+}
+
+.welcome {
+	margin-top: calc(-200px - env(safe-area-inset-top));
+
+	background-size: cover;
+	background-position: center;
+}
+
+.welcome_content {
+	background-color: #00000020;
+	backdrop-filter: blur(20px);
+	-webkit-backdrop-filter: blur(20px);
+
+	padding: 8px 20px;
+	padding-top: calc(200px + env(safe-area-inset-top));
+
+	color: #fff;
+}
+
+.CoursInfoContainer {
+	margin-top: 2px;
+	display: flex;
+	align-items: center;
+	gap: 10px;
+
+	width: calc(100vw - 145px);
+	margin-top: 5px;
+}
+
+.CoursInfoContainer .separator {
+	width: 1px;
+	height: 15px;
+	background: var(--ion-color-step-200);
+}
+
+.CoursInfo {
+	display: flex;
+	align-items: center;
+
+	font-size: 0.9em;
+	font-weight: 400;
+
+	opacity: 0.7;
+
+	width: fit-content;
+	max-width: 55%;
+
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	margin-bottom: 3px;
+}
+
+.CoursInfo span {
+	margin-right: 5px;
+}
+
+.CoursInfo.room {
+	opacity: 100%;
+	font-weight: 600;
+}
+
+a {
+	text-decoration: none !important;
+}
+
+ion-buttons[slot=end] {
+	margin-right: 12px !important;
+}
+
+.toolbar[color=primary] {
+	--ion-text-color: #fff !important;
+	color: #fff !important;
+}
+
+.NoCoursAnim-enter-from,
+.NoCoursAnim-leave-to {
+	height: 0px;
+	margin-top: -37px;
+	opacity: 0;
+	transform: scale(0.9) translateY(-30px);
+}
+
+@media screen and (min-width: 1150px) {
+	#components {
+		display: grid;
+		/* make 2 columns */
+		grid-template-columns: repeat(2, 1fr);
+
+		gap: 16px;
+		padding: 16px;
+	}
+
+	#components ion-list {
+		margin: 0;
+	}
+}
+
+.navlink {
+	width: 100%;
+
+}
+
+.navlink ion-label {
+	width: 100%;
+	padding: 10px 0px !important;
+}
+
+.navlink ion-label p {
+	margin-bottom: 5px;
+}
+
+.listHeader ion-label h2 {
+	font-size: 18px !important;
+}
+
+.listHeader ion-button {
+	--background: rgba(var(--ion-color-primary-rgb), 0.1);
+	--border-radius: 30px;
+	margin-top: -7px !important;
+	margin-right: 10px;
+}
+
+.listHeader ion-button::part(native) {
+	padding: 15px 10px;
+}
+
+.listHeader ion-button .mdls {
+	font-size: 22px !important;
+	margin-left: 2px;
+	margin-top: 2px;
+}
+
+.md .HomeHeader {
+	display: block !important;
+	box-shadow: none !important;
+	--border-color: transparent !important;
+	--border-width: 0 !important;
+	border-bottom: none !important;
+}
+
+.md .HomeHeader ion-toolbar {
+	--background: transparent;
+	--border-color: transparent;
+	--border-width: 0;
+
+	padding-top: 16px;
+}
+
+.md .welcomeHeader {
+	display: none;
+}
+</style>
