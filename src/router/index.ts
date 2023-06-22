@@ -23,6 +23,11 @@ const routes: Routes = [
     component: () => import ('../views/homepage/HomepageSetup.vue')
   },
   {
+    path: '/recap-year',
+    name: 'recap-year',
+    component: () => import ('../views/homepage/RecapYear.vue')
+  },
+  {
     path: '/timetable',
     name: 'Timetable',
     component: () => import ('../views/timetable/TimetableSetup.vue')
