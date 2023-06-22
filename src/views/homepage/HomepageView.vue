@@ -622,7 +622,7 @@ export default defineComponent({
 });
 </script>
 
-<template>
+rece<template>
 	<ion-page ref="page">
 		<IonHeader class="AppHeader" translucent>
 			<IonToolbar class="toolbar">
@@ -781,6 +781,15 @@ export default defineComponent({
 
 			<div id="components" ref="components">
 				<Transition name="ElemAnim">
+					<ion-list-header class="listHeader" id="comp-hw">
+							<ion-label>
+								<h2 style="font-size: 20px;">Récapitulatif de l'année scolaire</h2>
+							</ion-label>
+							<ion-button @click="goto('recapyear')">Y aller
+								<span class="material-symbols-outlined mdls" slot="end">arrow_outward</span></ion-button>
+						</ion-list-header>
+
+
 					<ion-list v-if="displayHomeworks && allLoaded && !hwloading" lines="none" id="comp-hw"
 						ref="comp-hw" inset="true">
 						<ion-list-header class="listHeader" v-if="allLoaded && !hwloading">
@@ -790,6 +799,7 @@ export default defineComponent({
 							<ion-button @click="goto('homework')">Voir tout
 								<span class="material-symbols-outlined mdls" slot="end">arrow_outward</span></ion-button>
 						</ion-list-header>
+
 
 						<div v-if="!hwloading"><ion-item-group class="hw_group" v-for="(day, i) in homeworks" :key="i">
 								<div class="homepage_divider">
@@ -909,10 +919,6 @@ export default defineComponent({
 .profile * {
 	margin: 0;
 	padding: 0;
-}
-
-.profile {
-	/* margin-top: -2.5px; */
 }
 
 .profile p {
@@ -1267,7 +1273,6 @@ ion-buttons[slot=end] {
 .navlink ion-label p {
 	margin-bottom: 5px;
 }
-
 .listHeader ion-label h2 {
 	font-size: 18px !important;
 }
