@@ -137,6 +137,12 @@ export default defineComponent({
 					disabled: false,
 				},
 				{
+					title: 'Recapitutalif Annuel',
+					url: '/recap-year',
+					icon: "history",
+					disabled: false,
+				},
+				{
 					title: 'Travail à faire',
 					url: '/homework',
 					icon: "auto_stories",
